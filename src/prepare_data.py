@@ -18,9 +18,16 @@ DATE_PATTERN = re.compile(r"(20\d{2}-\d{2}-\d{2})")
 def metadata_from_path(path):
     parts = [part.upper() for part in path.parts]
     site = None
-    for candidate in ("UFPR04", "UFPR05", "PUCPR", "PUC"):
-        if candidate in parts:
-            site = "PUCPR" if candidate == "PUC" else candidate
+    # Official archive directory aliases: parking1a/parking1b are the two
+    # views of the UFPR lot; parking2 is the PUCPR lot.
+    aliases = {
+        "UFPR04": "UFPR04", "PARKING1A": "UFPR04",
+        "UFPR05": "UFPR05", "PARKING1B": "UFPR05",
+        "PUCPR": "PUCPR", "PUC": "PUCPR", "PARKING2": "PUCPR",
+    }
+    for part in parts:
+        if part in aliases:
+            site = aliases[part]
             break
     if site is None:
         return None
@@ -36,6 +43,8 @@ def metadata_from_path(path):
 
 
 def find_segmented_root(dataset_root):
+    if dataset_root.is_dir() and dataset_root.name.lower() == "pklotsegmented":
+        return dataset_root
     for candidate in dataset_root.rglob("*"):
         if candidate.is_dir() and candidate.name.lower() == "pklotsegmented":
             return candidate
@@ -130,18 +139,33 @@ def collect_from_xml(dataset_root, crop_dir):
             occupied_value = space.get("occupied")
             if occupied_value not in {"0", "1"}:
                 continue
-            contour = space.find("contour")
-            if contour is None:
-                continue
+            # Most spaces provide a four-point contour. A small subset of the
+            # official annotations has only a rotatedRect, so fall back to it.
             points = []
-            for point in contour.findall("point"):
-                try:
-                    points.append([float(point.get("x")), float(point.get("y"))])
-                except (TypeError, ValueError):
-                    points = []
-                    break
+            contour = space.find("contour")
+            if contour is not None:
+                for point in contour.findall("point"):
+                    try:
+                        points.append([float(point.get("x")), float(point.get("y"))])
+                    except (TypeError, ValueError):
+                        points = []
+                        break
+
             if len(points) != 4:
-                continue
+                rotated = space.find("rotatedRect")
+                try:
+                    center = rotated.find("center")
+                    size = rotated.find("size")
+                    angle = rotated.find("angle")
+                    rect = (
+                        (float(center.get("x")), float(center.get("y"))),
+                        (float(size.get("w")), float(size.get("h"))),
+                        float(angle.get("d")),
+                    )
+                    points = cv2.boxPoints(rect).tolist()
+                except (AttributeError, TypeError, ValueError):
+                    continue
+
             crop = crop_space(frame, np.asarray(points, dtype=np.float32))
             if crop is None:
                 continue

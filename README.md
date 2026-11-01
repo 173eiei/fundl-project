@@ -30,7 +30,7 @@ Almeida, P. R. L., Oliveira, L. S., Britto Jr., A. S., Silva Jr., E. J., & Koeri
 
 ## Evaluation protocol
 
-The task uses individual parking-space crops and binary labels: 0 = Empty, 1 = Occupied.
+The official archive organizes scenes as `parking1a`, `parking1b`, and `parking2`; the preparation script maps these to UFPR04, UFPR05, and PUCPR respectively. It also accepts archives already organized under the canonical UFPR04/UFPR05/PUCPR names. The task uses individual parking-space crops and binary labels: 0 = Empty, 1 = Occupied.
 
 To reduce temporal leakage, all records from the same calendar date in the UFPR camera views are assigned to the same split:
 
