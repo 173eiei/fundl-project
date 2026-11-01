@@ -102,6 +102,18 @@ def main():
     fig.tight_layout()
     fig.savefig(output / "test_confusion_matrix.png", dpi=160)
     plt.show()
+    successes_dir = output / "success_cases"
+    successes_dir.mkdir(parents=True, exist_ok=True)
+    correct_rows = frame.loc[frame["correct"]].head(3)
+    for index, row in correct_rows.iterrows():
+        source = Path(str(row["path"]))
+        if source.is_file():
+            name = (
+                f"{index:06d}_true-{int(row['true_label'])}_"
+                f"pred-{int(row['predicted_label'])}_{source.name}"
+            )
+            shutil.copy2(source, successes_dir / name)
+
     failures_dir = output / "failure_cases"
     failures_dir.mkdir(parents=True, exist_ok=True)
     failures = frame.loc[~frame["correct"]].head(args.max_failures)
@@ -115,7 +127,7 @@ def main():
             shutil.copy2(source, failures_dir / name)
     print(json.dumps(metrics["model"], indent=2))
     print("Majority baseline:", json.dumps(metrics["majority_baseline"], indent=2))
-    print(f"Saved test metrics, predictions, confusion matrix, and {len(failures)} failure examples to {output}")
+    print(f"Saved test metrics, predictions, confusion matrix, {len(correct_rows)} success examples, and {len(failures)} failure examples to {output}")
 
 
 if __name__ == "__main__":
