@@ -8,6 +8,21 @@ import pandas as pd
 import torch
 from PIL import Image, ImageEnhance, ImageOps
 from torch.utils.data import Dataset, DataLoader
+from sklearn.model_selection import train_test_split
+
+
+def sample_frame(frame, max_samples, seed):
+    """Take a deterministic, class-stratified subset; <=0 means use all rows."""
+    if max_samples is None or max_samples <= 0 or len(frame) <= max_samples:
+        return frame.copy()
+    labels = frame["label"].astype(int)
+    if labels.nunique() > 1 and labels.value_counts().min() >= 2:
+        sampled, _ = train_test_split(
+            frame, train_size=max_samples, random_state=seed,
+            shuffle=True, stratify=labels,
+        )
+        return sampled.copy()
+    return frame.sample(n=max_samples, random_state=seed).copy()
 
 
 CLASS_NAMES = ["Empty", "Occupied"]
@@ -16,13 +31,15 @@ CLASS_NAMES = ["Empty", "Occupied"]
 class ParkingCropDataset(Dataset):
     """Load individual PKLot parking-space crops from a manifest CSV."""
 
-    def __init__(self, manifest, split, image_size=128, augment=False):
+    def __init__(self, manifest, split, image_size=128, augment=False,
+                 max_samples=0, seed=42):
         frame = pd.read_csv(manifest)
         required = {"path", "label", "split"}
         missing = required.difference(frame.columns)
         if missing:
             raise ValueError(f"Manifest is missing columns: {sorted(missing)}")
-        self.frame = frame.loc[frame["split"] == split].reset_index(drop=True)
+        self.frame = frame.loc[frame["split"] == split].copy()
+        self.frame = sample_frame(self.frame, max_samples, seed).reset_index(drop=True)
         if self.frame.empty:
             raise ValueError(f"No records found for split={split!r} in {manifest}")
         self.image_size = int(image_size)
@@ -63,11 +80,18 @@ class ParkingCropDataset(Dataset):
         return tensor, label
 
 
-def make_loaders(manifest, batch_size=64, image_size=128, num_workers=2, seed=42):
+def make_loaders(manifest, batch_size=64, image_size=128, num_workers=2, seed=42,
+                 max_train_samples=30000, max_val_samples=8000):
     generator = torch.Generator()
     generator.manual_seed(seed)
-    train_set = ParkingCropDataset(manifest, "train", image_size, augment=True)
-    val_set = ParkingCropDataset(manifest, "val", image_size, augment=False)
+    train_set = ParkingCropDataset(
+        manifest, "train", image_size, augment=True,
+        max_samples=max_train_samples, seed=seed,
+    )
+    val_set = ParkingCropDataset(
+        manifest, "val", image_size, augment=False,
+        max_samples=max_val_samples, seed=seed + 1,
+    )
     common = {
         "batch_size": batch_size,
         "num_workers": num_workers,

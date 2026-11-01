@@ -29,13 +29,20 @@ def main():
     parser.add_argument("--batch-size", type=int, default=64)
     parser.add_argument("--num-workers", type=int, default=2)
     parser.add_argument("--max-failures", type=int, default=12)
+    parser.add_argument("--max-test-samples", type=int, default=20000)
+    parser.add_argument("--seed", type=int, default=42)
     args = parser.parse_args()
     if not args.checkpoint.is_file():
         raise FileNotFoundError(f"Checkpoint not found: {args.checkpoint}")
     checkpoint = torch.load(args.checkpoint, map_location="cpu", weights_only=False)
     image_size = int(checkpoint.get("image_size", 128))
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    test_set = ParkingCropDataset(args.manifest, "test", image_size, augment=False)
+    manifest_all = pd.read_csv(args.manifest)
+    test_population_samples = int((manifest_all["split"] == "test").sum())
+    test_set = ParkingCropDataset(
+        args.manifest, "test", image_size, augment=False,
+        max_samples=args.max_test_samples, seed=args.seed,
+    )
     loader = DataLoader(
         test_set, batch_size=args.batch_size, shuffle=False,
         num_workers=args.num_workers, pin_memory=device.type == "cuda",
@@ -67,6 +74,9 @@ def main():
     metrics = {
         "test_site": "PUCPR",
         "test_samples": int(len(y_true)),
+        "test_population_samples_before_sampling": test_population_samples,
+        "test_sampling_seed": int(args.seed),
+        "test_is_random_subset": bool(len(y_true) < test_population_samples),
         "model": {
             "accuracy": float(accuracy_score(y_true, y_pred)),
             "precision_occupied": float(precision_score(y_true, y_pred, zero_division=0)),

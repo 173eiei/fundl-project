@@ -80,6 +80,9 @@ For a local environment, install a PyTorch build suitable for your machine first
 
 - Default seed: 42
 - Input size: 128 × 128
+- Default training subset: up to 30,000 crops (stratified by class)
+- Default validation subset: up to 8,000 crops (stratified by class)
+- Default held-out test subset: up to 20,000 crops (fixed-seed random sample; population count is logged)
 - Optimizer: AdamW
 - Loss: weighted cross-entropy (weights computed from the training split only)
 - Regularization: augmentation, dropout, weight decay, and early stopping

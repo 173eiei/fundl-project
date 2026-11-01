@@ -66,6 +66,8 @@ def main():
     parser.add_argument("--weight-decay", type=float, default=1e-4)
     parser.add_argument("--patience", type=int, default=5)
     parser.add_argument("--num-workers", type=int, default=2)
+    parser.add_argument("--max-train-samples", type=int, default=30000)
+    parser.add_argument("--max-val-samples", type=int, default=8000)
     parser.add_argument("--seed", type=int, default=42)
     args = parser.parse_args()
     if args.epochs < 1 or args.batch_size < 1 or args.image_size < 32:
@@ -76,10 +78,11 @@ def main():
     if device.type == "cuda":
         print(f"GPU: {torch.cuda.get_device_name(0)}")
     train_loader, val_loader = make_loaders(
-        args.manifest, args.batch_size, args.image_size, args.num_workers, args.seed
+        args.manifest, args.batch_size, args.image_size, args.num_workers, args.seed,
+        args.max_train_samples, args.max_val_samples,
     )
-    manifest = pd.read_csv(args.manifest)
-    train_labels = manifest.loc[manifest["split"] == "train", "label"].astype(int)
+    # Calculate class weights from the exact training subset presented to the optimizer.
+    train_labels = train_loader.dataset.frame["label"].astype(int)
     class_counts = np.bincount(train_labels, minlength=2)
     if np.any(class_counts == 0):
         raise ValueError(f"Both classes must appear in train split; counts={class_counts.tolist()}")
