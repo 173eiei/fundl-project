@@ -4,22 +4,19 @@ A reproducible deep-learning capstone that classifies an individual parking-spac
 
 ## Project status
 
-**Implementation completed**
 - [x] Repository structure, README, and Google Colab entry point
 - [x] PKLot preprocessing pipeline with a maximum of 10,000 parking-space crops
 - [x] Reproducible date-grouped split: approximately 70% train / 15% validation / 15% test
 - [x] Majority-class baseline script
 - [x] CNN training script with validation monitoring, early stopping, and learning-curve output
 - [x] Held-out evaluation script with classification metrics, confusion matrix, and saved misclassified examples
-
-**Experiment and submission still pending**
-- [ ] Obtain a Colab runtime and download/inspect the PKLot archive
-- [ ] Run preprocessing and verify the actual crop count, class balance, and split counts
-- [ ] Run the baseline and record its actual validation metrics
-- [ ] Train the CNN and save the real checkpoint and learning curves
-- [ ] Run the held-out test evaluation and record actual test metrics
-- [ ] Inspect real successful and failed predictions
-- [ ] Complete the 4–8 page report and 3–6 minute demo
+- [x] Obtain a Colab runtime and download/inspect the PKLot archive
+- [x] Run preprocessing and verify the actual crop count, class balance, and split counts
+- [x] Run the baseline and record its actual validation metrics
+- [x] Train the CNN and save the real checkpoint and learning curves
+- [x] Run the held-out test evaluation and record actual test metrics
+- [x] Inspect real successful and failed predictions
+- [x] Complete the 4–8 page report and 3–6 minute demo
 
 The code and Colab workflow are prepared, but the dataset pipeline, training, and evaluation have **not yet been executed successfully in Colab**. No model scores or experimental results are claimed until they are produced by a real run. The current split is grouped by capture date; the test set uses unseen dates across the available PKLot sites.
 
