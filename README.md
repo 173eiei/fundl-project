@@ -32,14 +32,9 @@ Almeida, P. R. L., Oliveira, L. S., Britto Jr., A. S., Silva Jr., E. J., & Koeri
 
 The official archive organizes scenes as `parking1a`, `parking1b`, and `parking2`; the preparation script maps these to UFPR04, UFPR05, and PUCPR respectively. It also accepts archives already organized under the canonical UFPR04/UFPR05/PUCPR names. The task uses individual parking-space crops and binary labels: 0 = Empty, 1 = Occupied.
 
+The experiment uses no more than **10,000 parking-space crops in total** (or fewer if fewer valid crops are available). The selected images are split approximately **70% train / 15% validation / 15% test**. Splitting is grouped by capture date across all sites, so a date cannot appear in more than one split. Actual counts can differ slightly from 7,000 / 1,500 / 1,500 because each date must remain intact. The exact counts, class balance, weather distribution, site distribution, and number of unique dates are saved in `data/processed/preparation_summary.json`.
 
-
-- Train and validation: UFPR04 and UFPR05, divided by capture date using a fixed seed.
-- Test: all PUCPR records, held out as a separate parking-lot/camera domain.
-
-UFPR04 and UFPR05 are two camera views of the same UFPR parking area; PUCPR is a different parking area. This is a deliberately harder cross-site test. Do not move test records into train/validation or use test metrics to select hyperparameters.
-
-The exact record counts and class balance are generated from the downloaded archive and saved in a preprocessing summary. They are not guessed in advance.
+The test set contains unseen capture dates drawn from the available camera sites. This measures performance on new dates, not generalisation to a completely unseen parking lot. Do not move test records into train/validation or use test metrics to select hyperparameters.
 
 ## Repository layout
 

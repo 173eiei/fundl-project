@@ -108,7 +108,7 @@ def main():
         confusion_matrix(y_true, y_pred, labels=[0, 1]),
         display_labels=["Empty", "Occupied"],
     ).plot(ax=ax, cmap="Blues", colorbar=False)
-    ax.set_title("Held-out PUCPR test set")
+    ax.set_title("Held-out-date test set")
     fig.tight_layout()
     fig.savefig(output / "test_confusion_matrix.png", dpi=160)
     plt.show()
