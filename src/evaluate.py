@@ -22,14 +22,14 @@ from src.model import ParkingCNN
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Evaluate the final model on the held-out PUCPR test site."
+        description="Evaluate the final model on held-out capture dates across PKLot sites."
     )
     parser.add_argument("--manifest", type=Path, default=Path("data/processed/manifest.csv"))
     parser.add_argument("--checkpoint", type=Path, default=Path("outputs/models/best.pt"))
     parser.add_argument("--batch-size", type=int, default=64)
     parser.add_argument("--num-workers", type=int, default=2)
     parser.add_argument("--max-failures", type=int, default=12)
-    parser.add_argument("--max-test-samples", type=int, default=20000)
+    parser.add_argument("--max-test-samples", type=int, default=0)
     parser.add_argument("--seed", type=int, default=42)
     args = parser.parse_args()
     if not args.checkpoint.is_file():
@@ -72,7 +72,7 @@ def main():
     majority_label = int(train_labels.value_counts().idxmax())
     baseline_predictions = np.full_like(y_true, majority_label)
     metrics = {
-        "test_site": "PUCPR",
+        "test_protocol": "held-out capture dates across the available PKLot sites",
         "test_samples": int(len(y_true)),
         "test_population_samples_before_sampling": test_population_samples,
         "test_sampling_seed": int(args.seed),

@@ -32,7 +32,7 @@ Almeida, P. R. L., Oliveira, L. S., Britto Jr., A. S., Silva Jr., E. J., & Koeri
 
 The official archive organizes scenes as `parking1a`, `parking1b`, and `parking2`; the preparation script maps these to UFPR04, UFPR05, and PUCPR respectively. It also accepts archives already organized under the canonical UFPR04/UFPR05/PUCPR names. The task uses individual parking-space crops and binary labels: 0 = Empty, 1 = Occupied.
 
-To reduce temporal leakage, all records from the same calendar date in the UFPR camera views are assigned to the same split:
+
 
 - Train and validation: UFPR04 and UFPR05, divided by capture date using a fixed seed.
 - Test: all PUCPR records, held out as a separate parking-lot/camera domain.
@@ -71,7 +71,7 @@ The exact record counts and class balance are generated from the downloaded arch
 For a local environment, install a PyTorch build suitable for your machine first, then run:
 
     pip install -r requirements.txt
-    python -m src.prepare_data --dataset-root /path/to/PKLot --output-dir data/processed --seed 42
+    python -m src.prepare_data --dataset-root /path/to/PKLot --output-dir data/processed --seed 42 --max-crops 10000
     python -m src.baseline --manifest data/processed/manifest.csv
     python -m src.train --manifest data/processed/manifest.csv --epochs 20 --batch-size 64 --image-size 128 --seed 42
     python -m src.evaluate --manifest data/processed/manifest.csv --checkpoint outputs/models/best.pt
@@ -79,10 +79,10 @@ For a local environment, install a PyTorch build suitable for your machine first
 ## Reproducibility and artifacts
 
 - Default seed: 42
-- Input size: 128 × 128
-- Default training subset: up to 30,000 crops (stratified by class)
-- Default validation subset: up to 8,000 crops (stratified by class)
-- Default held-out test subset: up to 20,000 crops (fixed-seed random sample; population count is logged)
+- Total dataset cap: 10,000 parking-space crops
+- Target split: approximately 70% train / 15% validation / 15% test, grouped by capture date
+- Input size: 128 × 128 (unchanged)
+- Training and evaluation use every sample in their respective manifest split
 - Optimizer: AdamW
 - Loss: weighted cross-entropy (weights computed from the training split only)
 - Regularization: augmentation, dropout, weight decay, and early stopping

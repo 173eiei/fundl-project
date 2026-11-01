@@ -81,7 +81,7 @@ class ParkingCropDataset(Dataset):
 
 
 def make_loaders(manifest, batch_size=64, image_size=128, num_workers=2, seed=42,
-                 max_train_samples=30000, max_val_samples=8000):
+                 max_train_samples=0, max_val_samples=0):
     generator = torch.Generator()
     generator.manual_seed(seed)
     train_set = ParkingCropDataset(

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import random
 import re
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -9,6 +10,7 @@ import cv2
 import numpy as np
 import pandas as pd
 from tqdm.auto import tqdm
+from sklearn.model_selection import GroupShuffleSplit
 
 
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png"}
@@ -115,10 +117,35 @@ def crop_space(frame, points):
     return crop if crop.size else None
 
 
-def collect_from_xml(dataset_root, crop_dir):
+def collect_from_xml(dataset_root, crop_dir, max_crops=10000, seed=42):
+    """Crop only sampled source frames, stopping once the requested crop cap is reached."""
+    grouped = {}
+    for xml_path in dataset_root.rglob("*.xml"):
+        metadata = metadata_from_path(xml_path)
+        if metadata is None:
+            continue
+        site, weather, date = metadata
+        grouped.setdefault((site, weather, date), []).append(xml_path)
+
+    # Shuffle within each site/weather/date group, then round-robin the groups.
+    # This avoids spending the whole crop budget on the first folder in the archive.
+    rng = random.Random(seed)
+    for paths in grouped.values():
+        rng.shuffle(paths)
+    xml_paths = []
+    group_keys = sorted(grouped)
+    while group_keys:
+        remaining = []
+        for key in group_keys:
+            paths = grouped[key]
+            if paths:
+                xml_paths.append(paths.pop())
+            if paths:
+                remaining.append(key)
+        group_keys = remaining
+
     records = []
-    xml_paths = list(dataset_root.rglob("*.xml"))
-    for xml_path in tqdm(xml_paths, desc="Cropping parking spaces from XML"):
+    for xml_path in tqdm(xml_paths, desc="Cropping sampled PKLot frames"):
         metadata = metadata_from_path(xml_path)
         if metadata is None:
             continue
@@ -139,8 +166,6 @@ def collect_from_xml(dataset_root, crop_dir):
             occupied_value = space.get("occupied")
             if occupied_value not in {"0", "1"}:
                 continue
-            # Most spaces provide a four-point contour. A small subset of the
-            # official annotations has only a rotatedRect, so fall back to it.
             points = []
             contour = space.find("contour")
             if contour is not None:
@@ -178,10 +203,12 @@ def collect_from_xml(dataset_root, crop_dir):
             )
             destination.parent.mkdir(parents=True, exist_ok=True)
             if not destination.exists():
-                cv2.imwrite(
+                ok = cv2.imwrite(
                     str(destination), crop,
                     [int(cv2.IMWRITE_JPEG_QUALITY), 95],
                 )
+                if not ok:
+                    continue
             records.append({
                 "path": str(destination.resolve()),
                 "label": label,
@@ -192,90 +219,209 @@ def collect_from_xml(dataset_root, crop_dir):
                 "frame_id": image_path.stem,
                 "space_id": str(space_id),
             })
+            if len(records) >= max_crops:
+                return records
     return records
 
 
-def assign_splits(frame, seed, val_fraction):
-    frame = frame.loc[frame["site"].isin({"UFPR04", "UFPR05", "PUCPR"})].copy()
-    test_mask = frame["site"] == "PUCPR"
-    trainval = frame.loc[~test_mask]
-    dates = sorted(trainval["date"].unique())
-    if len(dates) < 2:
-        raise RuntimeError("Need at least two UFPR dates for a date-grouped train/validation split.")
-    rng = np.random.default_rng(seed)
-    shuffled_dates = rng.permutation(dates)
-    val_count = max(1, int(round(len(dates) * val_fraction)))
-    val_dates = set(shuffled_dates[:val_count])
-    frame["split"] = "test"
-    frame.loc[(~test_mask) & frame["date"].isin(val_dates), "split"] = "val"
-    frame.loc[(~test_mask) & (~frame["date"].isin(val_dates)), "split"] = "train"
-    train_dates = set(frame.loc[frame["split"] == "train", "date"])
-    val_dates_actual = set(frame.loc[frame["split"] == "val", "date"])
-    if train_dates.intersection(val_dates_actual):
-        raise AssertionError("Date leakage detected between train and validation.")
-    if set(frame.loc[frame["split"] == "test", "site"]) != {"PUCPR"}:
-        raise AssertionError("Test split must contain only the held-out PUCPR site.")
-    return frame.sort_values(["split", "site", "date", "path"]).reset_index(drop=True)
+def cap_records(frame, max_crops, seed):
+    """Randomly sample no more than max_crops while preserving class proportions."""
+    if max_crops <= 0 or len(frame) <= max_crops:
+        return frame.reset_index(drop=True)
+    labels = frame["label"].astype(int)
+    proportions = labels.value_counts(normalize=True).sort_index()
+    allocation = {
+        int(label): int(round(float(frac) * max_crops))
+        for label, frac in proportions.items()
+    }
+    # Correct rounding so the allocation sums exactly to max_crops.
+    while sum(allocation.values()) < max_crops:
+        label = int(proportions.idxmax())
+        allocation[label] += 1
+    while sum(allocation.values()) > max_crops:
+        label = max(allocation, key=allocation.get)
+        allocation[label] -= 1
+
+    pieces = []
+    for label, count in allocation.items():
+        group = frame.loc[labels == label]
+        count = min(count, len(group))
+        if count:
+            pieces.append(group.sample(n=count, random_state=seed + label))
+    sampled = pd.concat(pieces, ignore_index=True)
+    return sampled.sample(frac=1.0, random_state=seed).reset_index(drop=True)
+
+
+def assign_splits(frame, seed):
+    """Create approximately 70/15/15 splits without sharing a capture date."""
+    if frame["date"].nunique() < 3:
+        raise RuntimeError("At least three distinct capture dates are required for 70/15/15 splitting.")
+
+    total = len(frame)
+    overall_positive = float(frame["label"].mean())
+    overall_sites = frame["site"].value_counts(normalize=True).to_dict()
+    groups = frame["date"].astype(str)
+    labels = frame["label"].astype(int)
+
+    def score_part(part, target_fraction):
+        if part.empty:
+            return 100.0
+        size_error = abs(len(part) / total - target_fraction)
+        label_error = abs(float(part["label"].mean()) - overall_positive)
+        site_mix = part["site"].value_counts(normalize=True).to_dict()
+        site_error = sum(
+            abs(site_mix.get(site, 0.0) - frac)
+            for site, frac in overall_sites.items()
+        )
+        missing_class_penalty = 1.0 if part["label"].nunique() < 2 else 0.0
+        return 4.0 * size_error + 2.0 * label_error + 0.5 * site_error + missing_class_penalty
+
+    outer = GroupShuffleSplit(n_splits=40, test_size=0.30, random_state=seed)
+    outer_candidates = []
+    for train_idx, hold_idx in outer.split(frame, labels, groups):
+        train_part = frame.iloc[train_idx]
+        hold_part = frame.iloc[hold_idx]
+        score = score_part(train_part, 0.70) + score_part(hold_part, 0.30)
+        outer_candidates.append((score, train_idx, hold_idx))
+    outer_candidates.sort(key=lambda item: item[0])
+
+    best = None
+    best_score = float("inf")
+    for _, train_idx, hold_idx in outer_candidates[:5]:
+        holdout = frame.iloc[hold_idx].reset_index(drop=True)
+        inner = GroupShuffleSplit(
+            n_splits=60, test_size=0.50, random_state=seed + 1
+        )
+        for val_idx, test_idx in inner.split(
+            holdout, holdout["label"].astype(int), holdout["date"].astype(str)
+        ):
+            train_part = frame.iloc[train_idx]
+            val_part = holdout.iloc[val_idx]
+            test_part = holdout.iloc[test_idx]
+            score = (
+                score_part(train_part, 0.70)
+                + score_part(val_part, 0.15)
+                + score_part(test_part, 0.15)
+            )
+            if score < best_score:
+                best_score = score
+                best = (train_part.copy(), val_part.copy(), test_part.copy())
+
+    if best is None:
+        raise RuntimeError("Could not create train/validation/test splits.")
+    train_part, val_part, test_part = best
+    train_part["split"] = "train"
+    val_part["split"] = "val"
+    test_part["split"] = "test"
+    result = pd.concat([train_part, val_part, test_part], ignore_index=True)
+
+    date_sets = {
+        name: set(group["date"].astype(str))
+        for name, group in result.groupby("split")
+    }
+    if date_sets["train"] & date_sets["val"]:
+        raise AssertionError("Capture-date leakage between train and validation.")
+    if date_sets["train"] & date_sets["test"]:
+        raise AssertionError("Capture-date leakage between train and test.")
+    if date_sets["val"] & date_sets["test"]:
+        raise AssertionError("Capture-date leakage between validation and test.")
+    return result.sort_values(["split", "site", "date", "path"]).reset_index(drop=True)
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Prepare PKLot crops and a date-grouped, held-out-site split."
+        description="Prepare a maximum of 10,000 PKLot crops with a date-grouped 70/15/15 split."
     )
     parser.add_argument("--dataset-root", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, default=Path("data/processed"))
     parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--val-fraction", type=float, default=0.20)
+    parser.add_argument("--max-crops", type=int, default=10000)
     args = parser.parse_args()
+
+    if args.max_crops < 3:
+        raise ValueError("--max-crops must be at least 3")
     dataset_root = args.dataset_root.expanduser().resolve()
     if not dataset_root.is_dir():
         raise FileNotFoundError(f"Dataset directory does not exist: {dataset_root}")
-    if not 0.05 <= args.val_fraction <= 0.40:
-        raise ValueError("--val-fraction must be between 0.05 and 0.40")
     args.output_dir.mkdir(parents=True, exist_ok=True)
+
     records = collect_segmented(dataset_root)
     source_mode = "PKLotSegmented"
     if not records:
-        source_mode = "XML full-frame annotations"
-        records = collect_from_xml(dataset_root, args.output_dir / "crops")
+        source_mode = "XML full-frame annotations (sampled until crop limit)"
+        records = collect_from_xml(
+            dataset_root, args.output_dir / "crops",
+            max_crops=args.max_crops, seed=args.seed,
+        )
     if not records:
         raise RuntimeError(
             "No PKLot records found. Expected PKLotSegmented/.../Empty|Occupied images "
             "or full-frame JPG files with matching XML annotations."
         )
+
     frame = pd.DataFrame(records).drop_duplicates(subset=["path"])
-    frame = assign_splits(frame, args.seed, args.val_fraction)
+    collected_before_cap = int(len(frame))
+    frame = cap_records(frame, args.max_crops, args.seed)
+    frame = assign_splits(frame, args.seed)
+
     manifest_path = args.output_dir / "manifest.csv"
     frame.to_csv(manifest_path, index=False)
+    split_counts = {
+        str(key): int(value)
+        for key, value in frame["split"].value_counts().items()
+    }
+    split_ratios = {
+        key: float(value / len(frame)) for key, value in split_counts.items()
+    }
     summary = {
         "source_mode": source_mode,
         "dataset_root": str(dataset_root),
-        "total_crops": int(len(frame)),
+        "crops_collected_before_cap": collected_before_cap,
+        "selected_crops": int(len(frame)),
+        "max_crops": int(args.max_crops),
         "seed": int(args.seed),
-        "validation_fraction_by_date": float(args.val_fraction),
-        "split_counts": {str(k): int(v) for k, v in frame["split"].value_counts().items()},
+        "target_split_ratios": {"train": 0.70, "val": 0.15, "test": 0.15},
+        "actual_split_counts": split_counts,
+        "actual_split_ratios": split_ratios,
         "class_counts": {
-            str(split): {str(k): int(v) for k, v in group["class_name"].value_counts().items()}
+            str(split): {
+                str(key): int(value)
+                for key, value in group["class_name"].value_counts().items()
+            }
             for split, group in frame.groupby("split")
         },
         "site_counts": {
-            str(split): {str(k): int(v) for k, v in group["site"].value_counts().items()}
+            str(split): {
+                str(key): int(value)
+                for key, value in group["site"].value_counts().items()
+            }
+            for split, group in frame.groupby("split")
+        },
+        "weather_counts": {
+            str(split): {
+                str(key): int(value)
+                for key, value in group["weather"].value_counts().items()
+            }
             for split, group in frame.groupby("split")
         },
         "unique_dates_by_split": {
-            str(k): int(v) for k, v in frame.groupby("split")["date"].nunique().items()
+            str(key): int(value)
+            for key, value in frame.groupby("split")["date"].nunique().items()
         },
     }
     (args.output_dir / "preparation_summary.json").write_text(
         __import__("json").dumps(summary, indent=2), encoding="utf-8"
     )
     print(f"Source mode: {source_mode}")
-    print(f"Manifest: {manifest_path}")
+    print(f"Crops collected: {collected_before_cap:,}")
+    print(f"Selected crops (maximum {args.max_crops:,}): {len(frame):,}")
     print("\nCounts by split, site, and class:")
     print(frame.groupby(["split", "site", "class_name"]).size().to_string())
+    print("\nActual split counts and ratios:")
+    print(pd.DataFrame({"count": split_counts, "ratio": split_ratios}).to_string())
     print("\nUnique dates per split:")
     print(frame.groupby("split")["date"].nunique().to_string())
-    print("\nDataset files are git-ignored and will not be pushed.")
+    print("\nCapture-date leakage check passed. Dataset files are not tracked by Git.")
 
 
 if __name__ == "__main__":

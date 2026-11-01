@@ -66,8 +66,8 @@ def main():
     parser.add_argument("--weight-decay", type=float, default=1e-4)
     parser.add_argument("--patience", type=int, default=5)
     parser.add_argument("--num-workers", type=int, default=2)
-    parser.add_argument("--max-train-samples", type=int, default=30000)
-    parser.add_argument("--max-val-samples", type=int, default=8000)
+    parser.add_argument("--max-train-samples", type=int, default=0)
+    parser.add_argument("--max-val-samples", type=int, default=0)
     parser.add_argument("--seed", type=int, default=42)
     args = parser.parse_args()
     if args.epochs < 1 or args.batch_size < 1 or args.image_size < 32:
